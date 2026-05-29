@@ -1,0 +1,268 @@
+# Smart Git Worktree Helper
+unalias gwt 2>/dev/null
+
+gwt() {
+  # Helper to print a consistent clean layout divider
+  print_divider() { echo "--------------------------------------------------"; }
+
+  # ==========================================
+  # SUBCOMMAND: RUN (Kill Port & Start Server)
+  # ==========================================
+  if [ "$1" = "run" ]; then
+    local target_folder=""
+
+    if [ -d ".bare" ]; then
+      local requested="${2:-main}"
+      target_folder="${requested//\//-}"
+      
+      if [ ! -d "$target_folder" ]; then
+        echo "❌ Error: Folder '$target_folder' does not exist."
+        echo "👉 Usage from root: gwt run [<worktree-folder-name>]"
+        return 1
+      fi
+      
+      print_divider
+      echo "⚡ Preparing workspace in '$target_folder'..."
+      echo "🚫 Clearing port 3001..."
+      npx kill-port 3001
+
+      print_divider
+      echo "🚀 Starting development server..."
+      cd "$target_folder" && npm run dev:control
+      return 0
+
+    elif [ -f ".git" ] || [ -d "../.bare" ]; then
+      target_folder=$(basename "$(pwd)")
+      
+      print_divider
+      echo "⚡ You are already inside '$target_folder'."
+      echo "🚫 Clearing port 3001..."
+      npx kill-port 3001
+
+      print_divider
+      echo "🚀 Starting development server..."
+      npm run dev:control
+      return 0
+    else
+      print_divider
+      echo "🚫 Clearing port 3001..."
+      npx kill-port 3001
+
+      print_divider
+      echo "🚀 Starting development server..."
+      npm run dev:control
+      return 0
+    fi
+
+  # ==========================================
+  # SUBCOMMAND: ADD (Branch tracking + Faster npm)
+  # ==========================================
+  elif [ "$1" = "add" ]; then
+    if [ -z "$2" ]; then
+      echo "❌ Error: Missing branch name. Usage: gwt add <branch-name> [<base-branch>]"
+      return 1
+    fi
+
+    local branch=$2
+    local base=$3
+    local folder="${branch//\//-}"
+    local root_dir=$(pwd)
+    
+    print_divider
+    local branch_exists=$(git --git-dir=.bare branch --list "$branch")
+    
+    if [ -d ".bare" ]; then
+      if [ -n "$branch_exists" ]; then
+        if [ -n "$base" ]; then
+          echo "🌿 Branch '$branch' already exists. Force-resetting it to base branch '$base'..."
+          git --git-dir=.bare branch -f "$branch" "$base" || return 1
+        else
+          echo "🌿 Branch '$branch' already exists. Checking out current local state..."
+        fi
+        git --git-dir=.bare worktree add "$folder" "$branch" || return 1
+      else
+        if [ -n "$base" ]; then
+          echo "✨ Creating new branch '$branch' based on '$base'..."
+          git --git-dir=.bare worktree add "$folder" -b "$branch" "$base" || return 1
+        else
+          echo "✨ Creating new branch '$branch' from current HEAD..."
+          git --git-dir=.bare worktree add "$folder" -b "$branch" || return 1
+        fi
+      fi
+    else
+      if [ -n "$base" ]; then
+        git worktree add "$folder" -b "$branch" "$base" || return 1
+      else
+        git worktree add "$folder" -b "$branch" || return 1
+      fi
+    fi
+
+    echo "⬇️  Pulling any remote changes for '$branch'..."
+    (cd "$folder" && git pull origin "$branch" --rebase 2>/dev/null || echo "ℹ️  No remote branch found on origin yet. Proceeding with local state.")
+
+    if [ -f ".npmrc" ]; then
+      cp ".npmrc" "$folder/.npmrc"
+      echo "📝 Copied root .npmrc to $folder/"
+    elif [ -f "main/.npmrc" ]; then
+      cp "main/.npmrc" "$folder/.npmrc"
+      echo "📝 Copied main/.npmrc to $folder/"
+    fi
+
+    # Sync GitHub Agent & Prompt assets from main
+    if [ -d "main/.github/agents" ] || [ -d "main/.github/prompts" ]; then
+      echo "🤖 Syncing AI configuration templates..."
+      mkdir -p "$folder/.github"
+      
+      if [ -d "main/.github/agents" ]; then
+        cp -R "main/.github/agents" "$folder/.github/"
+        echo "   ✅ .github/agents copied"
+      fi
+      
+      if [ -d "main/.github/prompts" ]; then
+        cp -R "main/.github/prompts" "$folder/.github/"
+        echo "   ✅ .github/prompts copied"
+      fi
+    fi
+
+    # Sync App-level Configurations (.env files)
+    if [ -d "main/apps" ]; then
+      echo "🔑 Syncing application profiles..."
+      for app_path in main/apps/*/; do
+        [ -d "$app_path" ] || continue 
+        local app_name=$(basename "$app_path")
+        
+        if [ -f "main/apps/$app_name/.env" ]; then
+          mkdir -p "$folder/apps/$app_name"
+          cp "main/apps/$app_name/.env" "$folder/apps/$app_name/.env"
+          echo "   ✅ $app_name/.env copied"
+        fi
+        
+        if [ -f "main/apps/$app_name/.npmrc" ]; then
+          mkdir -p "$folder/apps/$app_name"
+          cp "main/apps/$app_name/.npmrc" "$folder/apps/$app_name/.npmrc"
+          echo "   📝 $app_name/.npmrc copied"
+        fi
+      done
+    fi
+
+    # Handle High-Speed Dependency Installation & VS Code Auto-Open
+    if [ -f "$folder/package.json" ]; then
+      print_divider
+      echo "📦 Running High-Speed Cache Installation... (Please wait)"
+      if (cd "$folder" && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps); then
+        print_divider
+        echo "🎉 Workspace fully prepared!"
+        
+        if command -v code >/dev/null 2>&1; then
+          echo "🚀 Launching VS Code for $folder..."
+          code "$root_dir/$folder"
+        fi
+      else
+        print_divider
+        echo "❌ npm install failed! Cleaning up worktree folder..."
+        if [ -d ".bare" ]; then
+          git --git-dir=.bare worktree remove "$folder"
+        else
+          git worktree remove "$folder"
+        fi
+        return 1
+      fi
+    fi
+
+  # ==========================================
+  # SUBCOMMAND: REMOVE (With Dynamic Port Killing)
+  # ==========================================
+  elif [ "$1" = "remove" ]; then
+    if [ -z "$2" ]; then
+      echo "ℹ️  Active Worktrees:"
+      if [ -d ".bare" ]; then
+        git --git-dir=.bare worktree list
+      else
+        git worktree list
+      fi
+      echo "👉 Usage: gwt remove <branch-or-folder-1> [<branch-or-folder-2> ...]"
+      return 0
+    fi
+
+    shift
+    
+    for target in "$@"; do
+      local folder=""
+      local branch=""
+
+      if [[ "$target" == *"/"* ]]; then
+        branch="$target"
+        folder="${target//\//-}"
+      else
+        folder="$target"
+        branch="${target/-//}" 
+      fi
+      
+      print_divider
+      echo "🗑️  Preparing to completely wipe branch '$branch' and folder '$folder'..."
+
+      if [[ "$(pwd)" == *"$folder"* ]]; then
+        echo "❌ Error: You cannot delete '$folder' while your terminal is standing inside it!"
+        echo "⏭️  Skipping this target."
+        continue
+      fi
+
+      # NEW: Check if this specific folder is actively running the app on port 3001
+      if command -v lsof >/dev/null 2>&1; then
+        # Find the absolute path of the process locking port 3001
+        local port_owner_path=$(lsof -t -i:3001 -sTCP:LISTEN | xargs pwdx 2>/dev/null | awk -F': ' '{print $2}')
+        
+        # Fallback for systems where pwdx isn't standard (e.g. some macOS targets)
+        if [ -z "$port_owner_path" ]; then
+          local active_pid=$(lsof -t -i:3001 -sTCP:LISTEN)
+          if [ -n "$active_pid" ]; then
+            port_owner_path=$(ps -o command= -p "$active_pid" 2>/dev/null | awk '{print $1}')
+          fi
+        fi
+
+        # If the running process path contains our target folder name, kill it!
+        if [[ "$port_owner_path" == *"$folder"* ]]; then
+          echo "⚡ Detected running app on port 3001 inside '$folder'. Killing process..."
+          npx kill-port 3001
+          sleep 1 # Give the operating system a second to fully release file locks [1]
+        fi
+      fi
+
+      if [ -d ".bare" ]; then
+        if git --git-dir=.bare worktree remove "$folder" 2>/dev/null; then
+          git --git-dir=.bare branch -D "$branch" 2>/dev/null
+          echo "✅ '$folder' and branch successfully destroyed."
+        else
+          echo "⚠️  '$folder' contains uncommitted modifications or untracked assets."
+          echo -n "❓ Force delete this specific workspace? (y/N): "
+          read -r response </dev/tty
+          
+          if [[ "$response" =~ ^[Yy]$ ]]; then
+            echo "💥 Force-wiping environment..."
+            git --git-dir=.bare worktree remove --force "$folder" 2>/dev/null
+            git --git-dir=.bare branch -D "$branch" 2>/dev/null
+            echo "✅ '$folder' and branch forcefully destroyed."
+          else
+            echo "🛑 Skipped '$folder'."
+          fi
+        fi
+      else
+        git worktree remove "$folder" && git branch -D "$branch"
+      fi
+    done
+
+    if [ -d ".bare" ]; then
+      git --git-dir=.bare worktree prune
+    fi
+
+  # ==========================================
+  # SUBCOMMAND: ALL OTHERS (List, Prune, etc.)
+  # ==========================================
+  else
+    if [ -d ".bare" ]; then
+      git --git-dir=.bare worktree "$@"
+    else
+      git worktree "$@"
+    fi
+  fi
+}
