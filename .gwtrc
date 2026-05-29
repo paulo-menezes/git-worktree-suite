@@ -149,7 +149,7 @@ gwt() {
     if [ -f "$folder/package.json" ]; then
       print_divider
       echo "📦 Running High-Speed Cache Installation... (Please wait)"
-      if (cd "$folder" && npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps); then
+      if (cd "$folder" && npm install --prefer-offline --no-audit --no-fund); then
         print_divider
         echo "🎉 Workspace fully prepared!"
         
