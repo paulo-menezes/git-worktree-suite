@@ -60,21 +60,21 @@ gwt() {
   elif [ "$1" = "add" ]; then
     shift
 
-    local prefix=""
+    local branch_override=""
     local -a positional
     positional=()
     while [ $# -gt 0 ]; do
       case "$1" in
-        -p|--prefix)
+        -b|--branch)
           if [ -z "$2" ]; then
             echo "❌ Error: '$1' requires a value."
             return 1
           fi
-          prefix="$2"
+          branch_override="$2"
           shift 2
           ;;
-        --prefix=*)
-          prefix="${1#*=}"
+        --branch=*)
+          branch_override="${1#*=}"
           shift
           ;;
         *)
@@ -86,21 +86,19 @@ gwt() {
 
     set -- "${positional[@]}"
 
-    if [ -z "$1" ]; then
-      echo "❌ Error: Missing branch name. Usage: gwt add [-p|--prefix <prefix>] <branch-name> [<base-branch>]"
+    if [ -z "$1" ] && [ -z "$branch_override" ]; then
+      echo "❌ Error: Missing name. Usage: gwt add <name> [<base-branch>] [-b|--branch <branch-name>]"
       return 1
     fi
 
-    local branch="$1"
+    # Positional name acts as the worktree/folder identity (defaults to the
+    # branch name when no explicit --branch is supplied). When --branch is
+    # given, the branch-name definition flow is skipped entirely.
+    local name="${1:-$branch_override}"
     local base="$2"
+    local branch="${branch_override:-$name}"
 
-    # Strip trailing slash from prefix to avoid double slashes.
-    if [ -n "$prefix" ]; then
-      prefix="${prefix%/}"
-      branch="$prefix/$branch"
-    fi
-
-    local folder="${branch//\//-}"
+    local folder="${name//\//-}"
     local root_dir=$(pwd)
     
     print_divider
