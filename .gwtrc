@@ -61,6 +61,7 @@ gwt() {
     shift
 
     local branch_override=""
+    local run_dev=true
     local -a positional
     positional=()
     while [ $# -gt 0 ]; do
@@ -77,6 +78,10 @@ gwt() {
           branch_override="${1#*=}"
           shift
           ;;
+        --no-run|--skip-run)
+          run_dev=false
+          shift
+          ;;
         *)
           positional+=("$1")
           shift
@@ -87,7 +92,7 @@ gwt() {
     set -- "${positional[@]}"
 
     if [ -z "$1" ] && [ -z "$branch_override" ]; then
-      echo "❌ Error: Missing name. Usage: gwt add <name> [<base-branch>] [-b|--branch <branch-name>]"
+      echo "❌ Error: Missing name. Usage: gwt add <name> [<base-branch>] [-b|--branch <branch-name>] [--no-run]"
       return 1
     fi
 
@@ -191,13 +196,25 @@ gwt() {
     if [ -f "$folder/package.json" ]; then
       print_divider
       echo "📦 Running High-Speed Cache Installation... (Please wait)"
-      if (cd "$folder" && npm install --prefer-offline --no-audit --no-fund); then
+      if (cd "$folder" && npm ci --no-audit --no-fund); then
         print_divider
         echo "🎉 Workspace fully prepared!"
         
         if command -v code >/dev/null 2>&1; then
           echo "🚀 Launching VS Code for $folder..."
           code "$root_dir/$folder"
+        fi
+
+        if [ "$run_dev" = true ]; then
+          print_divider
+          echo "🚫 Clearing port 3001..."
+          npx kill-port 3001
+
+          print_divider
+          echo "🚀 Starting development server in '$folder'..."
+          (cd "$folder" && npm run dev:control)
+        else
+          echo "⏭️  Skipping dev server startup (--no-run)."
         fi
       else
         print_divider
@@ -222,12 +239,29 @@ gwt() {
       else
         git worktree list
       fi
-      echo "👉 Usage: gwt remove <branch-or-folder-1> [<branch-or-folder-2> ...]"
+      echo "👉 Usage: gwt remove [--safe] <branch-or-folder-1> [<branch-or-folder-2> ...]"
       return 0
     fi
 
     shift
-    
+
+    # Force delete by default; pass --safe (-s) to confirm before wiping
+    # worktrees that contain uncommitted or untracked changes.
+    local safe_mode=false
+    local -a targets
+    targets=()
+    for arg in "$@"; do
+      case "$arg" in
+        --safe|-s)
+          safe_mode=true
+          ;;
+        *)
+          targets+=("$arg")
+          ;;
+      esac
+    done
+    set -- "${targets[@]}"
+
     for target in "$@"; do
       local folder=""
       local branch=""
@@ -274,7 +308,7 @@ gwt() {
         if git --git-dir=.bare worktree remove "$folder" 2>/dev/null; then
           git --git-dir=.bare branch -D "$branch" 2>/dev/null
           echo "✅ '$folder' and branch successfully destroyed."
-        else
+        elif [ "$safe_mode" = true ]; then
           echo "⚠️  '$folder' contains uncommitted modifications or untracked assets."
           echo -n "❓ Force delete this specific workspace? (y/N): "
           read -r response </dev/tty
@@ -287,9 +321,14 @@ gwt() {
           else
             echo "🛑 Skipped '$folder'."
           fi
+        else
+          echo "💥 '$folder' has uncommitted changes — force-wiping environment..."
+          git --git-dir=.bare worktree remove --force "$folder" 2>/dev/null
+          git --git-dir=.bare branch -D "$branch" 2>/dev/null
+          echo "✅ '$folder' and branch forcefully destroyed."
         fi
       else
-        git worktree remove "$folder" && git branch -D "$branch"
+        git worktree remove --force "$folder" && git branch -D "$branch"
       fi
     done
 
