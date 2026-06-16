@@ -207,12 +207,20 @@ gwt() {
 
         if [ "$run_dev" = true ]; then
           print_divider
-          echo "🚫 Clearing port 3001..."
-          npx kill-port 3001
+          echo -n "❓ Do you want to run the application now? (Y/n): "
+          read -r run_response </dev/tty
 
-          print_divider
-          echo "🚀 Starting development server in '$folder'..."
-          (cd "$folder" && npm run dev:control)
+          if [[ ! "$run_response" =~ ^[Nn]$ ]]; then
+            print_divider
+            echo "🚫 Clearing port 3001..."
+            npx kill-port 3001
+
+            print_divider
+            echo "🚀 Starting development server in '$folder'..."
+            (cd "$folder" && npm run dev:control)
+          else
+            echo "⏭️  Skipping dev server startup."
+          fi
         else
           echo "⏭️  Skipping dev server startup (--no-run)."
         fi
