@@ -6,9 +6,47 @@ gwt() {
   print_divider() { echo "--------------------------------------------------"; }
 
   # ==========================================
+  # SUBCOMMAND: HELP (List available commands)
+  # ==========================================
+  if [ "$1" = "help" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    print_divider
+    echo "🌳 gwt — Smart Git Worktree Helper"
+    print_divider
+    echo ""
+    echo "USAGE:"
+    echo "  gwt <command> [options]"
+    echo ""
+    echo "COMMANDS:"
+    echo "  add <name> [<base-branch>] [-b|--branch <branch>] [--no-run]"
+    echo "      Create a worktree + branch, sync configs (.npmrc, .env,"
+    echo "      .github agents/prompts, .copilot-local), npm ci, open VS Code,"
+    echo "      and optionally start the dev server."
+    echo "        -b, --branch <branch>   Use an explicit branch name."
+    echo "        --no-run, --skip-run    Skip the dev server prompt/startup."
+    echo ""
+    echo "  remove [--safe|-s] <branch-or-folder> [<more> ...]"
+    echo "      Remove worktree(s) and delete their branch(es). Force-deletes"
+    echo "      by default; kills the dev server on port 3001 if it's running"
+    echo "      inside the target. Run with no args to list active worktrees."
+    echo "        --safe, -s              Confirm before wiping dirty worktrees."
+    echo ""
+    echo "  run [<worktree-folder>]"
+    echo "      Clear port 3001 and start the dev server (npm run dev:control)."
+    echo "      From the root, pass a folder name (defaults to 'main')."
+    echo ""
+    echo "  help, -h, --help"
+    echo "      Show this help message."
+    echo ""
+    echo "  <anything else>"
+    echo "      Passed straight through to 'git worktree' (e.g. list, prune,"
+    echo "      move, lock). Uses the .bare git dir when present."
+    print_divider
+    return 0
+
+  # ==========================================
   # SUBCOMMAND: RUN (Kill Port & Start Server)
   # ==========================================
-  if [ "$1" = "run" ]; then
+  elif [ "$1" = "run" ]; then
     local target_folder=""
 
     if [ -d ".bare" ]; then
